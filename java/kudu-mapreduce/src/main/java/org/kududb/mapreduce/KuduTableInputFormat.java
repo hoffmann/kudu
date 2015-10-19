@@ -19,7 +19,9 @@ import com.google.common.base.Objects;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
 import org.apache.commons.net.util.Base64;
+import org.kududb.ColumnSchema;
 import org.kududb.Schema;
+import org.kududb.Type;
 import org.kududb.annotations.InterfaceAudience;
 import org.kududb.annotations.InterfaceStability;
 import org.kududb.client.*;
@@ -27,7 +29,17 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.io.BooleanWritable;
+import org.apache.hadoop.io.ByteWritable;
+import org.apache.hadoop.io.BytesWritable;
+import org.apache.hadoop.io.DoubleWritable;
+import org.apache.hadoop.io.FloatWritable;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.MapWritable;
 import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.io.ShortWritable;
+import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.mapreduce.InputFormat;
 import org.apache.hadoop.mapreduce.InputSplit;
@@ -63,7 +75,7 @@ import java.util.Map;
  */
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
-public class KuduTableInputFormat extends InputFormat<NullWritable, RowResult>
+public class KuduTableInputFormat extends InputFormat<NullWritable, MapWritable>
     implements Configurable {
 
   private static final Log LOG = LogFactory.getLog(KuduTableInputFormat.class);
@@ -215,7 +227,7 @@ public class KuduTableInputFormat extends InputFormat<NullWritable, RowResult>
   }
 
   @Override
-  public RecordReader<NullWritable, RowResult> createRecordReader(InputSplit inputSplit,
+  public RecordReader<NullWritable, MapWritable> createRecordReader(InputSplit inputSplit,
       TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
     return new TableRecordReader();
   }
@@ -369,7 +381,7 @@ public class KuduTableInputFormat extends InputFormat<NullWritable, RowResult>
     }
   }
 
-  class TableRecordReader extends RecordReader<NullWritable, RowResult> {
+  class TableRecordReader extends RecordReader<NullWritable, MapWritable> {
 
     private final NullWritable currentKey = NullWritable.get();
     private RowResult currentValue;
@@ -430,8 +442,40 @@ public class KuduTableInputFormat extends InputFormat<NullWritable, RowResult>
     }
 
     @Override
-    public RowResult getCurrentValue() throws IOException, InterruptedException {
-      return currentValue;
+    public MapWritable getCurrentValue() throws IOException, InterruptedException {
+      MapWritable row = new MapWritable();
+      Schema schema = currentValue.getSchema();
+      for (int i = 0; i < schema.getColumnCount(); i++) {
+        ColumnSchema col = schema.getColumnByIndex(i);
+	switch (col.getType().getDataType()){
+	  case STRING:
+            row.put(new Text(col.getName()), new Text(currentValue.getString(i)));
+            break;
+	  case BOOL:
+            row.put(new Text(col.getName()), new BooleanWritable(currentValue.getBoolean(i)));
+            break;
+	  case DOUBLE:
+            row.put(new Text(col.getName()), new DoubleWritable(currentValue.getDouble(i)));
+            break;
+	  case FLOAT:
+            row.put(new Text(col.getName()), new FloatWritable(currentValue.getFloat(i)));
+            break;
+	  case INT16:
+            row.put(new Text(col.getName()), new ShortWritable(currentValue.getShort(i)));
+            break;
+	  case INT32:
+            row.put(new Text(col.getName()), new IntWritable(currentValue.getInt(i)));
+            break;
+	  case INT64:
+          case TIMESTAMP:
+            row.put(new Text(col.getName()), new LongWritable(currentValue.getLong(i)));
+            break;
+	  case BINARY:
+            row.put(new Text(col.getName()), new BytesWritable(currentValue.getBinaryCopy(i)));
+            break; 
+	}
+      }
+      return row;
     }
 
     @Override
